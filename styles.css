@@ -1,0 +1,16 @@
+@font-face{font-family:Bodoni;src:url('assets/bodoni-moda.ttf') format('truetype');font-weight:400 900;font-display:swap}
+:root{color-scheme:dark;background:#03050b;color:#e3cda5;font-family:Bodoni,Didot,Georgia,serif}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}
+.experience{position:relative;isolation:isolate;height:100svh;width:100%;overflow:hidden;background:radial-gradient(ellipse at 43% 38%,#17233d 0,#0b1224 35%,#03050b 79%)}
+.experience::after{content:'';position:absolute;inset:0;z-index:5;pointer-events:none;opacity:.017;background:url('assets/grain.png') repeat;mix-blend-mode:screen}
+.brand{position:absolute;z-index:0;left:50%;top:49%;transform:translate(-50%,-50%);display:grid;margin:0;white-space:nowrap;font-size:20vw;font-weight:500;font-optical-sizing:none;font-variation-settings:'opsz' 96,'wght' 500;line-height:1.1;letter-spacing:-.045em;user-select:none;opacity:0;filter:blur(var(--title-blur,0px))}
+.brand>span{grid-area:1/1}.brand-depth{color:#201a17;transform:translate(2px,5px);text-shadow:0 1px 0 #8b6e43,0 2px 0 #4b3927,0 3px 0 #1d1820,1px 6px 2px #000b,6px 24px 18px #000c,0 38px 42px #0009}
+.brand-face{background:linear-gradient(164deg,#f5e7ca 9%,#dfc9a1 32%,#ab8753 62%,#ead5af 83%,#9b7846 100%);background-clip:text;-webkit-background-clip:text;color:transparent;-webkit-text-stroke:.3px #ead5af55;filter:drop-shadow(-.5px -.8px .2px #fff0cc55)}
+#film,#poster{position:absolute;inset:0;z-index:2;width:100%;height:100%;display:block;pointer-events:none}#poster[hidden],#film[hidden]{display:none}#poster img{display:block;width:100%;height:100%;object-fit:contain}
+#film:not([data-ready="true"]){background:#000}
+#film[data-interactive]{pointer-events:auto;touch-action:none;cursor:grab}
+#film[data-dragging]{cursor:grabbing}
+#film:focus-visible{outline:1px solid #c5a26d88;outline-offset:-2px}
+.media-source{position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
+@media(max-width:700px){.brand{top:46%;letter-spacing:-.05em}.brand-depth{transform:translate(1px,3px);text-shadow:0 1px 0 #6e5536,0 2px 0 #201a18,2px 10px 12px #000c,0 20px 24px #0009}.experience{background:radial-gradient(ellipse at 45% 44%,#15213b 0,#0b1224 38%,#03050b 83%)}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}

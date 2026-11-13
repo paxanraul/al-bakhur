@@ -1,0 +1,7 @@
+{
+  "name": "al-bakhur",
+  "private": true,
+  "scripts": {
+    "dev": "python3 serve.py"
+  }
+}
