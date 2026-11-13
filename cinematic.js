@@ -1,5 +1,5 @@
 import { enableBottleViews } from './bottle-views.js?v=2';
-import { playPhoneFilm } from './phone-film.js?v=4';
+import { playPhoneFilm } from './phone-film.js?v=5';
 
 const canvas=document.querySelector('#film');
 const poster=document.querySelector('#poster');

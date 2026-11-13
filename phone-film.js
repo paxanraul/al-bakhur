@@ -1,4 +1,5 @@
 import { createPhoneTurn } from './phone-turn.js?v=1';
+import { createPhoneVideo } from './phone-video.js?v=1';
 
 const FPS = 25;
 const RISE_AT = 3300;
@@ -33,6 +34,7 @@ export function playPhoneFilm(poster, fallback, reduced) {
   let view = 0;
   let turning = false;
   let stopped = false;
+  let nativeTurn, nativeActive = false, nativeFailed = false;
   const wrap = value => ((value % VIEWS) + VIEWS) % VIEWS;
 
   function layout() {
@@ -89,8 +91,30 @@ export function playPhoneFilm(poster, fallback, reduced) {
     frameTime = null;
   }
 
+  function frameCanvas() {
+    return turnRenderer?.canvas ?? canvas;
+  }
+
+  function pauseNativeTurn() {
+    if (!nativeTurn) return;
+    if (nativeActive) view = wrap(nativeTurn.video.currentTime * VIEWS * 1000 / TURN_DURATION);
+    nativeActive = false;
+    nativeTurn.pause();
+    frameCanvas().hidden = false;
+    if (turning) drawTurn(view);
+  }
+
+  function resumeTurn() {
+    if (stopped || document.hidden || drag || resumeTimer) return;
+    if (!nativeTurn || nativeFailed) {
+      schedule();
+      return;
+    }
+    nativeTurn.play(view / VIEWS * TURN_DURATION / 1000);
+  }
+
   function schedule() {
-    if (!animation && !stopped && !document.hidden && !drag && !resumeTimer) {
+    if (!animation && !nativeActive && !stopped && !document.hidden && !drag && !resumeTimer) {
       animation = requestAnimationFrame(tick);
     }
   }
@@ -98,7 +122,7 @@ export function playPhoneFilm(poster, fallback, reduced) {
   function startTurn() {
     turning = true;
     riseFrames = null;
-    if (turnRenderer) control.replaceChildren(turnRenderer.canvas);
+    if (turnRenderer) canvas.replaceWith(turnRenderer.canvas);
     else canvas.height = TURN_HEIGHT;
     control.tabIndex = 0;
     control.setAttribute('aria-valuemax', '359');
@@ -107,6 +131,7 @@ export function playPhoneFilm(poster, fallback, reduced) {
     layout();
     drawTurn(0);
     announceAngle();
+    resumeTurn();
   }
 
   function showPoster() {
@@ -117,7 +142,7 @@ export function playPhoneFilm(poster, fallback, reduced) {
 
   function tick(now) {
     animation = 0;
-    if (stopped || document.hidden) return;
+    if (stopped || nativeActive || document.hidden) return;
     const delta = frameTime === null ? 0 : now - frameTime;
     frameTime = now;
     if (turning) {
@@ -164,7 +189,7 @@ export function playPhoneFilm(poster, fallback, reduced) {
     clearTimeout(resumeTimer);
     resumeTimer = setTimeout(() => {
       resumeTimer = 0;
-      schedule();
+      resumeTurn();
     }, 2000);
   }
 
@@ -173,6 +198,7 @@ export function playPhoneFilm(poster, fallback, reduced) {
     clearTimeout(resumeTimer);
     resumeTimer = 0;
     stopFrames();
+    pauseNativeTurn();
     drag = { id: event.pointerId, x: event.clientX, view };
     control.setPointerCapture(event.pointerId);
   });
@@ -191,6 +217,7 @@ export function playPhoneFilm(poster, fallback, reduced) {
     if (stopped || !turning || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault();
     stopFrames();
+    pauseNativeTurn();
     view = wrap(view + (event.key === 'ArrowRight' ? 2 : -2));
     drawTurn(view);
     announceAngle();
@@ -205,12 +232,15 @@ export function playPhoneFilm(poster, fallback, reduced) {
         if (control.hasPointerCapture(id)) control.releasePointerCapture(id);
       }
       stopFrames();
-    } else schedule();
+      pauseNativeTurn();
+    } else if (turning) resumeTurn();
+    else schedule();
   });
   reduced.addEventListener?.('change', ({ matches }) => {
     if (!matches) return;
     stopped = true;
     stopFrames();
+    pauseNativeTurn();
     showPoster();
   });
 
@@ -218,10 +248,26 @@ export function playPhoneFilm(poster, fallback, reduced) {
   poster.hidden = true;
   control.tabIndex = -1;
   control.setAttribute('aria-disabled', 'true');
+  nativeTurn = createPhoneVideo(control, () => {
+    if (stopped || document.hidden || drag || resumeTimer) {
+      pauseNativeTurn();
+      return;
+    }
+    nativeActive = true;
+    stopFrames();
+    frameCanvas().hidden = true;
+  }, time => {
+    nativeFailed = true;
+    if (nativeActive) view = wrap(time * VIEWS * 1000 / TURN_DURATION);
+    nativeActive = false;
+    frameCanvas().hidden = false;
+    schedule();
+  });
   loadFrames('./assets/rise-frames.webp').then(image => {
     if (!image && !stopped) {
       stopped = true;
       stopFrames();
+      pauseNativeTurn();
       showPoster();
       canvas.remove();
       control.removeAttribute('aria-disabled');
@@ -248,8 +294,10 @@ export function playPhoneFilm(poster, fallback, reduced) {
       turnRenderer = null;
       if (!turning || stopped) return;
       canvas.height = TURN_HEIGHT;
-      control.replaceChildren(canvas);
-      drawTurn(view);
+      canvas.hidden = nativeActive;
+      const lost = event.currentTarget;
+      lost.replaceWith(canvas);
+      if (!nativeActive) drawTurn(view);
     });
   });
   schedule();

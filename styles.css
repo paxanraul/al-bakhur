@@ -30,3 +30,7 @@
 }
 @keyframes phone-title{0%{opacity:0;filter:blur(9px)}100%{opacity:1;filter:none}}
 @keyframes phone-fog{0%,13.333%{background-color:#000;opacity:1}100%{opacity:0}}
+
+#bottle-views canvas[hidden]{display:none}
+.phone-turn-video{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:0}
+.phone-turn-video.is-playing{opacity:1}
