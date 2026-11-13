@@ -1,3 +1,5 @@
+import { enableBottleViews } from './bottle-views.js?v=2';
+
 const canvas=document.querySelector('#film');
 const poster=document.querySelector('#poster');
 const title=document.querySelector('.brand');
@@ -13,7 +15,7 @@ let entryStarted=false,loopStarted=false,failed=false,initialized=false;
 let entry,loop,decodedFrames=0,requests=0,draws=0,timelineTicks=0,seeks=0;
 let viewport=[0,0],origin=[0,0],titleOpacity=-1,entryDuration=null;
 let pointer=null,desiredTime=null,seekFrame=0,resumeTimer=0,holding=false;
-let fallbackTimer=0;
+let fallbackTimer=0, playbackTimer=0, lastFogDraw=-Infinity, lastSeek=-Infinity;
 const callbacks=new Map();
 const wrap=t=>((t%TURN)+TURN)%TURN;
 function setPhase(next){phase=next;canvas.dataset.phase=next;}
@@ -39,9 +41,36 @@ function releaseVideo(video){
  callbacks.delete(video);video.removeAttribute('src');video.load();video.remove();
 }
 function staticFallback(){
- failed=true;setPhase('STATIC');stopTimers();pointer=null;
- canvas.removeAttribute('data-interactive');canvas.tabIndex=-1;
- entry?.pause();loop?.pause();canvas.hidden=true;poster.hidden=false;revealTitle();
+ if(failed)return;
+ failed=true;
+ setPhase('STATIC');
+ stopTimers();
+ clearTimeout(playbackTimer);
+ pointer=null;
+ canvas.removeAttribute('data-interactive');
+ canvas.tabIndex=-1;
+ releaseVideo(entry);
+ releaseVideo(loop);
+ activeVideo=null;
+ canvas.hidden=true;
+ poster.hidden=false;
+ revealTitle();
+ if(!reduced.matches)enableBottleViews(poster, mobile);
+}
+function watchPlayback(video){
+ clearTimeout(playbackTimer);
+ playbackTimer=setTimeout(()=>{
+  if(document.hidden||failed)return;
+  if(video===entry&&!entryStarted)return;
+  if(video===loop&&holding)return;
+  staticFallback();
+ }, 4500);
+}
+function playVideo(video){
+ watchPlayback(video);
+ return video.play().catch(()=>{
+  if(!document.hidden)staticFallback();
+ });
 }
 function shader(type,source){
  const sh=gl.createShader(type);gl.shaderSource(sh,source);gl.compileShader(sh);
@@ -97,7 +126,7 @@ function prepareGL(){
 }
 function resize(){
  fitTitle();if(!gl||failed)return;
- const dpr=Math.min(devicePixelRatio,1.5);
+ const dpr=entryStarted?Math.min(devicePixelRatio,1.5):.75;
  viewport=[Math.round(innerWidth*dpr),Math.round(innerHeight*dpr)];
  let left=0,top=0,right=innerWidth,bottom=innerHeight;
  if(loopStarted){
@@ -122,7 +151,9 @@ function draw(){
  if(!gl||failed||document.hidden)return;
  try{
   if(activeVideo&&activeVideo.readyState>=2&&videoDirty){
-   gl.bindTexture(gl.TEXTURE_2D,texture);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,activeVideo);videoDirty=false;hasVideo=true;decodedFrames++;
+   gl.bindTexture(gl.TEXTURE_2D,texture);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,activeVideo);
+   if(!hasVideo&&gl.getError()!==gl.NO_ERROR){staticFallback();return;}
+   videoDirty=false;hasVideo=true;decodedFrames++;
   }
   gl.uniform2f(uniforms.resolution,...viewport);gl.uniform2f(uniforms.origin,...origin);
   gl.uniform2f(uniforms.mediaSize,...media);
@@ -151,25 +182,39 @@ function fallbackFrames(){
 function makeVideo(name,isLoop){
  const video=document.createElement('video');video.className='media-source';video.setAttribute('aria-hidden','true');video.tabIndex=-1;video.muted=true;video.defaultMuted=true;video.volume=0;video.playsInline=true;video.setAttribute('webkit-playsinline','');video.preload='auto';video.loop=isLoop;
  video.src=`assets/${name}-${variant}.mp4`;document.body.append(video);requests++;
+ video.addEventListener('timeupdate',()=>{
+  if(!document.hidden&&!video.paused&&!video.seeking&&video===activeVideo)watchPlayback(video);
+ });
  video.addEventListener('error',()=>{if(!failed&&video.hasAttribute('src'))staticFallback();});
  video.addEventListener('playing',()=>{
-  if(failed)return;
+  if(failed||document.hidden)return;
+  watchPlayback(video);
   activeVideo=video;videoDirty=true;setPhase(isLoop?'LOOP':'ENTRY');draw();fallbackFrames();
+  if(failed)return;
   if(!isLoop&&!loop)loop=makeVideo('turn',true);
-  if(isLoop&&entry){entryDuration=entry.duration;const finished=entry;entry=null;releaseVideo(finished);}
+  if(isLoop){
+   canvas.dataset.interactive='true';
+   canvas.tabIndex=0;
+   canvas.setAttribute('aria-disabled','false');
+   updateAngle();
+   if(entry){entryDuration=entry.duration;const finished=entry;entry=null;releaseVideo(finished);}
+  }
  });
  watchVideo(video);return video;
 }
 async function beginEntry(){
- if(entryStarted||failed||document.hidden||elapsed<ENTRY_AT||entry.readyState<2)return;
+ if(entryStarted||failed||document.hidden||elapsed<ENTRY_AT)return;
  entryStarted=true;setPhase('ENTRY_PENDING');
- try{entry.currentTime=0;await entry.play();}catch{staticFallback();}
+ resize();
+ await playVideo(entry);
 }
 async function beginLoop(){
  if(loopStarted||failed)return;
- loopStarted=true;setPhase('LOOP_PENDING');resize();
- canvas.dataset.interactive='true';canvas.tabIndex=0;canvas.setAttribute('aria-disabled','false');updateAngle();
- try{loop.currentTime=0;if(!document.hidden)await loop.play();}catch{staticFallback();}
+ loopStarted=true;
+ setPhase('LOOP_PENDING');
+ resize();
+ if(!loop)loop=makeVideo('turn',true);
+ if(!document.hidden)await playVideo(loop);
 }
 function tick(now){
  frame=0;if(failed||document.hidden||reduced.matches){previous=null;return;}
@@ -179,30 +224,32 @@ function tick(now){
  if(elapsed>=ENTRY_AT){
   elapsed=ENTRY_AT;revealTitle();setPhase('WAITING');draw();beginEntry();previous=null;return;
  }
- draw();frame=requestAnimationFrame(tick);
+ if(now-lastFogDraw>=31&&elapsed<=3.1){draw();lastFogDraw=now;}
+ frame=requestAnimationFrame(tick);
 }
 function queueSeek(){
  if(seekFrame||failed||document.hidden)return;
- seekFrame=requestAnimationFrame(()=>{
+ seekFrame=requestAnimationFrame(now=>{
   seekFrame=0;if(!loop||loop.seeking||desiredTime===null)return;
+  if(now-lastSeek<48){queueSeek();return;}
   const target=Math.floor(wrap(desiredTime)*FPS)/FPS;
   if(Math.abs(loop.currentTime-target)<.018){desiredTime=null;return;}
-  desiredTime=null;seeks++;loop.currentTime=target;
+  desiredTime=null;lastSeek=now;seeks++;loop.currentTime=target;
  });
 }
 function resumeAuto(){
  clearTimeout(resumeTimer);
  if(failed||document.hidden||pointer)return;
- holding=false;desiredTime=null;loop?.play().catch(staticFallback);
+ holding=false;desiredTime=null;playVideo(loop);
 }
 function hold(){
- clearTimeout(resumeTimer);holding=true;loop.pause();clearTimeout(fallbackTimer);
+ clearTimeout(resumeTimer);holding=true;loop.pause();clearTimeout(fallbackTimer);clearTimeout(playbackTimer);
 }
 function scheduleResume(){
  clearTimeout(resumeTimer);resumeTimer=setTimeout(resumeAuto,RESUME_DELAY);
 }
 canvas.addEventListener('pointerdown',event=>{
- if(!loopStarted||failed||event.isPrimary===false||event.button!==0||pointer)return;
+ if(phase!=='LOOP'||failed||event.isPrimary===false||event.button!==0||pointer)return;
  hold();pointer={id:event.pointerId,x:event.clientX,time:loop.currentTime};desiredTime=null;
  canvas.setPointerCapture(event.pointerId);canvas.dataset.dragging='true';
 });
@@ -218,7 +265,7 @@ function endDrag(event){
 }
 canvas.addEventListener('pointerup',endDrag);canvas.addEventListener('pointercancel',endDrag);canvas.addEventListener('lostpointercapture',endDrag);
 canvas.addEventListener('keydown',event=>{
- if(!loopStarted||failed)return;
+ if(phase!=='LOOP'||failed)return;
  let target=desiredTime??loop.currentTime;
  if(event.key==='ArrowLeft')target-=TURN/72;
  else if(event.key==='ArrowRight')target+=TURN/72;
@@ -228,11 +275,22 @@ canvas.addEventListener('keydown',event=>{
  event.preventDefault();hold();desiredTime=target;queueSeek();scheduleResume();
 });
 async function initialize(){
- fitTitle();await document.fonts.ready;fitTitle();
+ fitTitle();
+ document.fonts?.ready.then(fitTitle);
  if(reduced.matches){staticFallback();return;}
+ if(mobile){
+  const hero=poster.closest('main');
+  hero.dataset.phoneIntro='';
+  setPhase('IMAGES');
+  const rise = poster.getAnimations?.().find(animation => animation.animationName === 'phone-rise');
+  enableBottleViews(poster, true, rise?.finished);
+  return;
+ }
  try{
-  prepareGL();entry=makeVideo('entry',false);
-  entry.addEventListener('ended',beginLoop);entry.addEventListener('loadeddata',beginEntry);entry.addEventListener('canplay',beginEntry);
+  prepareGL();
+  revealTitle(0);poster.hidden=true;canvas.hidden=false;
+  entry=makeVideo('entry',false);
+  entry.addEventListener('ended',beginLoop);
   initialized=true;setPhase('TITLE');canvas.dataset.ready='true';frame=requestAnimationFrame(tick);
  }catch{canvas.dataset.ready='failed';staticFallback();}
 }
@@ -240,18 +298,19 @@ addEventListener('resize',resize);
 canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();staticFallback();});
 document.addEventListener('visibilitychange',()=>{
  stopTimers();
+ clearTimeout(playbackTimer);
  if(document.hidden){
   if(pointer){const id=pointer.id;pointer=null;delete canvas.dataset.dragging;try{canvas.releasePointerCapture(id)}catch{}}
   entry?.pause();loop?.pause();
- }else if(!failed&&!reduced.matches){
-  if(loopStarted){if(holding)scheduleResume();else loop.play().catch(staticFallback);}
-  else if(entryStarted&&!entry?.ended)entry.play().catch(staticFallback);
+ }else if(initialized&&!failed&&!reduced.matches){
+  if(loopStarted){if(holding)scheduleResume();else playVideo(loop);}
+  else if(entryStarted&&!entry?.ended)playVideo(entry);
   else if(entryStarted&&entry?.ended)beginLoop();
   else if(elapsed>=ENTRY_AT)beginEntry();
   else frame=requestAnimationFrame(tick);
   draw();
  }
 });
-reduced.addEventListener('change',()=>{if(reduced.matches)staticFallback();});
+reduced.addEventListener?.('change',()=>{if(reduced.matches)staticFallback();});
 export function inspectExperience(){return {initialized,failed,phase,elapsed,titleOpacity,variant,hasVideo,decodedFrames,requests,activeTime:activeVideo?.currentTime??null,entryDuration:entry?.duration??entryDuration,loopDuration:loop?.duration??null,entryPaused:entry?.paused??true,loopPaused:loop?.paused??true,canvas:[canvas.width,canvas.height],draws,timelineTicks,seeks,holding,dragging:!!pointer,pendingSeek:desiredTime,videoElements:document.querySelectorAll('video').length,framePending:!!frame,canvasOrigin:origin};}
 export const experienceReady=initialize();
