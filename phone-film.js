@@ -1,3 +1,5 @@
+import { createPhoneTurn } from './phone-turn.js?v=1';
+
 const FPS = 25;
 const RISE_AT = 3300;
 const RISE_DURATION = 2400;
@@ -23,7 +25,7 @@ export function playPhoneFilm(poster, fallback, reduced) {
   canvas.height = RISE_HEIGHT;
   control.append(canvas);
 
-  let riseFrames, turnFrames, animation, resumeTimer, drag;
+  let riseFrames, turnFrames, turnRenderer, animation, resumeTimer, drag;
   let elapsed = 0;
   let waitingForRise = 0;
   let frameTime = null;
@@ -59,6 +61,10 @@ export function playPhoneFilm(poster, fallback, reduced) {
     const first = Math.floor(wrapped);
     const mix = wrapped - first;
     const next = (first + 1) % VIEWS;
+    if (turnRenderer) {
+      turnRenderer.draw(first, next, mix);
+      return;
+    }
     context.clearRect(0, 0, TILE_WIDTH, TURN_HEIGHT);
     context.globalAlpha = 1 - mix;
     tile(turnFrames[first % 2], Math.floor(first / 2), TURN_HEIGHT);
@@ -91,7 +97,9 @@ export function playPhoneFilm(poster, fallback, reduced) {
 
   function startTurn() {
     turning = true;
-    canvas.height = TURN_HEIGHT;
+    riseFrames = null;
+    if (turnRenderer) control.replaceChildren(turnRenderer.canvas);
+    else canvas.height = TURN_HEIGHT;
     control.tabIndex = 0;
     control.setAttribute('aria-valuemax', '359');
     control.setAttribute('aria-disabled', 'false');
@@ -114,7 +122,7 @@ export function playPhoneFilm(poster, fallback, reduced) {
     frameTime = now;
     if (turning) {
       view = wrap(view + delta * VIEWS / TURN_DURATION);
-      if (now >= nextDraw) {
+      if (turnRenderer || now >= nextDraw) {
         drawTurn(view);
         nextDraw = Math.max(nextDraw + 1000 / FPS, now + 1000 / FPS / 2);
       }
@@ -227,7 +235,22 @@ export function playPhoneFilm(poster, fallback, reduced) {
     loadFrames('./assets/turn-frames.webp'),
     loadFrames('./assets/turn-frames-between.webp'),
   ]).then(images => {
-    if (images.every(Boolean)) turnFrames = images;
+    if (!images.every(Boolean) || stopped) return;
+    turnFrames = images;
+    try {
+      turnRenderer = createPhoneTurn(images, TILE_WIDTH, TURN_HEIGHT);
+    } catch {
+      // Keep the image viewer operational on phones without WebGL.
+      turnRenderer = null;
+    }
+    turnRenderer?.canvas.addEventListener('webglcontextlost', event => {
+      event.preventDefault();
+      turnRenderer = null;
+      if (!turning || stopped) return;
+      canvas.height = TURN_HEIGHT;
+      control.replaceChildren(canvas);
+      drawTurn(view);
+    });
   });
   schedule();
 }
