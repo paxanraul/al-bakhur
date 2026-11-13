@@ -1,4 +1,5 @@
 import { enableBottleViews } from './bottle-views.js?v=2';
+import { playPhoneFilm } from './phone-film.js?v=3';
 
 const canvas=document.querySelector('#film');
 const poster=document.querySelector('#poster');
@@ -279,11 +280,8 @@ async function initialize(){
  document.fonts?.ready.then(fitTitle);
  if(reduced.matches){staticFallback();return;}
  if(mobile){
-  const hero=poster.closest('main');
-  hero.dataset.phoneIntro='';
   setPhase('IMAGES');
-  const rise = poster.getAnimations?.().find(animation => animation.animationName === 'phone-rise');
-  enableBottleViews(poster, true, rise?.finished);
+  playPhoneFilm(poster, () => enableBottleViews(poster, true), reduced);
   return;
  }
  try{
